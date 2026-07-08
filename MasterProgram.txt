@@ -1,0 +1,287 @@
+*&---------------------------------------------------------------------*
+*& Include ZBB_HOSPMANAGETOP                                 Module Pool      ZBB_HOSPMANAGE
+*&
+*&---------------------------------------------------------------------*
+PROGRAM ZBB_HOSPMANAGE.
+DATA :
+
+ gv_bedid     TYPE zbb_bed-bed_id,
+  gv_patient   TYPE zbb_bed-allotted_to,
+  gv_ward      TYPE zbb_bed-ward_name,
+  gv_dept      TYPE zbb_bed-department_code,
+  gv_admit     TYPE zbb_bed-admitted_to,
+  gv_discharge TYPE zbb_bed-discharge_date.
+
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_STATUS_0100.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0100  OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE STATUS_0100 OUTPUT.
+SET PF-STATUS 'GUI_STATUS'.
+SET TITLEBAR 'MODULE_POOL_PROGRAM'.
+ENDMODULE.
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_USER_COMMANDI01.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE USER_COMMAND_0100 INPUT.
+  case sy-ucomm.
+    when 'PAT'.
+      call TRANSACTION 'ZBB_PATIENT'.
+     WHEN  'OPD'.
+       CALL TRANSACTION 'ZBB_OPD'.
+     when  'BED'.
+       call TRANSACTION 'ZBB_BED'.
+     when 'ADM'.
+       call screen 0200.
+      when 'DIS'.
+        call screen 0300.
+      WHEN 'BACK' OR 'CANC'.
+        LEAVE PROGRAM.
+   ENDCASE.
+
+ENDMODULE.
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_STATUS_2001.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0200  OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE STATUS_0200 OUTPUT.
+*SET PF-STATUS 'xxxxxxxx'.
+SET TITLEBAR 'TITLE_OF_SCREEN'.
+ENDMODULE.
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_DEFAULT_VALUO01.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  DEFAULT_VALUES  OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE DEFAULT_VALUES OUTPUT.
+   IF gv_bedid IS NOT INITIAL.
+    IF gv_admit IS INITIAL.
+      gv_admit = sy-datum.
+    ENDIF.
+
+    IF gv_discharge IS INITIAL.
+      gv_discharge = sy-datum + 7.
+    ENDIF.
+  ELSE.
+    CLEAR: gv_admit, gv_discharge.
+  ENDIF.
+ENDMODULE.
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_FETCH_BED_DEI01.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  FETCH_BED_DETAILS  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE FETCH_BED_DETAILS INPUT.
+
+  IF gv_bedid IS INITIAL.
+   CLEAR: gv_ward,
+           gv_dept,
+           gv_patient,
+           gv_admit,
+           gv_discharge.
+    RETURN.
+  ENDIF.
+
+  IF sy-ucomm = 'SAVE' OR sy-ucomm = 'ADMIT'.
+    RETURN.
+  ENDIF.
+
+  SELECT SINGLE
+         ward_name
+         department_code
+         allotted_to
+
+    INTO ( gv_ward,
+           gv_dept,
+           gv_patient
+           )
+    FROM zbb_bed
+    WHERE bed_id = gv_bedid.
+
+  IF sy-subrc <> 0.
+
+
+    MESSAGE 'Bed ID not found' TYPE 'S' DISPLAY LIKE 'E'.
+  ENDIF.
+
+ENDMODULE.
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_USER_COMMANDI02.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0200  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE USER_COMMAND_0200 INPUT.
+   DATA lv_count TYPE i.
+
+  CASE sy-ucomm.
+
+    WHEN 'SAVE'.
+
+* Check patient already allotted
+
+      SELECT COUNT(*)
+        INTO lv_count
+        FROM zbb_bed
+       WHERE allotted_to = gv_patient.
+
+      IF lv_count > 0.
+
+        MESSAGE 'Patient already has a bed'
+        TYPE 'E'.
+
+      ENDIF.
+
+* Lock Patient
+
+      CALL FUNCTION 'ENQUEUE_EZBB_PATIENT'
+        EXPORTING
+          patient_id = gv_patient.
+
+      UPDATE zbb_bed
+         SET allotted_to    = gv_patient
+             admitted_to    = gv_admit
+             discharge_date = gv_discharge
+       WHERE bed_id = gv_bedid.
+
+      COMMIT WORK.
+
+      CALL FUNCTION 'DEQUEUE_EZBB_PATIENT'
+        EXPORTING
+          patient_id = gv_patient.
+
+      MESSAGE 'Patient admitted'
+      TYPE 'S'.
+
+       WHEN 'BACK'.
+            CLEAR:
+        gv_bedid,
+        gv_ward,
+        gv_dept,
+        gv_patient,
+        gv_admit,
+        gv_discharge.
+      LEAVE TO SCREEN 0100.
+           WHEN 'EXIT'.
+             LEAVE PROGRAM.
+             WHEN 'CANC'.
+               LEAVE TO SCREEN 0.
+
+  ENDCASE.
+
+
+ENDMODULE.
+
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_STATUS_03.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0300  OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE STATUS_0300 OUTPUT.
+*  SET PF-STATUS 'xxxxxxxx'.
+ SET TITLEBAR 'STATUS_0300_TITLE'.
+ENDMODULE.
+
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_FETCH_BED_UPI01.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  FETCH_BED_UPDATE  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE FETCH_BED_UPDATE INPUT.
+
+SELECT SINGLE ward_name
+               department_code
+               allotted_to
+               admitted_to
+               discharge_date
+  INTO (gv_ward,
+        gv_dept,
+        gv_patient,
+        gv_admit,
+        gv_discharge)
+  FROM zbb_bed
+  WHERE bed_id = gv_bedid.
+
+
+  IF sy-subrc <> 0.
+    MESSAGE 'Bed ID not found' TYPE 'E' DISPLAY LIKE 'E'.
+
+  ENDIF.
+
+ENDMODULE.
+
+
+*----------------------------------------------------------------------*
+***INCLUDE ZBB_HOSPMANAGE_USER_COMMANDI03.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0300  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE     USER_COMMAND_0300 INPUT.
+  CASE sy-ucomm.
+
+WHEN 'DIS'.
+UPDATE zbb_bed
+  SET allotted_to    = ''
+      discharge_date = sy-datum
+  WHERE bed_id = gv_bedid.
+
+IF sy-subrc = 0.
+  COMMIT WORK.
+  MESSAGE 'Patient discharged successfully' TYPE 'S'.
+ENDIF.
+
+ WHEN 'BACK'.
+
+ CLEAR:
+        gv_bedid,
+        gv_ward,
+        gv_dept,
+        gv_patient,
+        gv_admit,
+        gv_discharge.
+
+      LEAVE TO SCREEN 0100.
+
+
+
+ ENDCASE.
+
+ENDMODULE.

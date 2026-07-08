@@ -1,0 +1,189 @@
+REPORT zbb_bed.
+
+TABLES: zbb_bed,
+        zbb_patient.
+
+TYPE-POOLS: slis.
+
+*----------------------*
+* Selection Screen
+*----------------------*
+SELECT-OPTIONS:
+  s_bedid FOR zbb_bed-bed_id,
+  s_patid FOR zbb_bed-allotted_to,
+  s_admit FOR zbb_bed-admitted_to.
+
+PARAMETERS:
+  p_ward TYPE zbb_bed-ward_name,
+  p_dept TYPE zbb_bed-department_code.
+
+*----------------------*
+* Data Declarations
+*----------------------*
+DATA: lt_list TYPE slis_t_listheader,
+      ls_list TYPE slis_listheader.
+
+DATA: lv_date TYPE char20,
+      lv_time TYPE char10.
+
+TYPES: BEGIN OF ty_final,
+         bed_id          TYPE zbb_bed-bed_id,
+         ward_name       TYPE zbb_bed-ward_name,
+         department_code TYPE zbb_bed-department_code,
+         allotted_to     TYPE zbb_bed-allotted_to,
+         admitted_to     TYPE zbb_bed-admitted_to,
+         discharge_date  TYPE zbb_bed-discharge_date,
+         first_name      TYPE zbb_patient-first_name,
+         last_name       TYPE zbb_patient-last_name,
+         phone           TYPE zbb_patient-phone,
+         email_id        TYPE zbb_patient-email_id,
+         city            TYPE zbb_patient-city,
+         region_code     TYPE zbb_patient-region_code,
+       END OF ty_final.
+
+DATA: gt_final TYPE TABLE OF ty_final,
+      gs_final TYPE ty_final.
+
+DATA: gt_fieldcat TYPE slis_t_fieldcat_alv,
+      gs_fieldcat TYPE slis_fieldcat_alv.
+
+DATA: gt_events TYPE slis_t_event,
+      gs_event  TYPE slis_alv_event.
+
+*----------------------*
+* START-OF-SELECTION
+*----------------------*
+START-OF-SELECTION.
+
+  SELECT
+    a~bed_id,
+    a~ward_name,
+    a~department_code       AS department_code,
+    a~allotted_to,
+    a~admitted_to        AS admitted_on,
+    a~discharge_date       AS discharge_date,
+    b~first_name,
+    b~last_name,
+    b~phone,
+    b~email_id,
+    b~city,
+    b~region_code        AS region_code
+    INTO TABLE @gt_final
+    FROM zbb_bed AS a
+    INNER JOIN zbb_patient AS b
+      ON a~allotted_to = b~patient_id
+    WHERE a~bed_id      IN @s_bedid
+      AND a~allotted_to IN @s_patid
+      AND a~admitted_to    IN @s_admit.
+
+*-- Filters
+  IF p_ward IS NOT INITIAL.
+    DELETE gt_final WHERE ward_name <> p_ward.
+  ENDIF.
+
+  IF p_dept IS NOT INITIAL.
+    DELETE gt_final WHERE department_code <> p_dept.
+  ENDIF.
+
+  IF gt_final IS INITIAL.
+    MESSAGE 'No Data Found' TYPE 'I'.
+    EXIT.
+  ENDIF.
+
+*----------------------*
+* Header Information
+*----------------------*
+  WRITE sy-datum TO lv_date.
+  WRITE sy-uzeit TO lv_time.
+
+  CLEAR ls_list.
+  ls_list-typ  = 'H'.
+  ls_list-info = 'Patient Report'.
+  APPEND ls_list TO lt_list.
+
+  CLEAR ls_list.
+  ls_list-typ  = 'S'.
+  ls_list-key  = 'Run Date'.
+  ls_list-info = lv_date.
+  APPEND ls_list TO lt_list.
+
+  CLEAR ls_list.
+  ls_list-typ  = 'S'.
+  ls_list-key  = 'Run Time'.
+  ls_list-info = lv_time.
+  APPEND ls_list TO lt_list.
+
+  CLEAR ls_list.
+  ls_list-typ  = 'S'.
+  ls_list-key  = 'Run By'.
+  ls_list-info = sy-uname.
+  APPEND ls_list TO lt_list.
+
+*----------------------*
+* Build Field Catalog
+*----------------------*
+
+* Bed ID
+  PERFORM add_fieldcat USING 'BED_ID' 'Bed ID'.
+
+* Ward
+  PERFORM add_fieldcat USING 'WARD_NAME' 'Ward'.
+
+* Department
+  PERFORM add_fieldcat USING 'DEPARTMENT_CODE' 'Department'.
+
+* Patient ID
+  PERFORM add_fieldcat USING 'ALLOTTED_TO' 'Patient ID'.
+
+* ✅ Date fields (FIXED)
+  CLEAR gs_fieldcat.
+  gs_fieldcat-fieldname  = 'ADMITTED_TO'.
+  gs_fieldcat-seltext_m  = 'Admitted Date'.
+  gs_fieldcat-ref_tabname  = 'ZBB_BED'.
+  gs_fieldcat-ref_fieldname  = 'ADMITTED'.
+  APPEND gs_fieldcat TO gt_fieldcat.
+
+  CLEAR gs_fieldcat.
+  gs_fieldcat-fieldname  = 'DISCHARGE_DATE'.
+  gs_fieldcat-seltext_m  = 'Discharge Date'.
+  gs_fieldcat-ref_tabname  = 'ZBB_BED'.
+  gs_fieldcat-ref_fieldname  = 'DISCHARGE'.
+  APPEND gs_fieldcat TO gt_fieldcat.
+
+* Patient details
+  PERFORM add_fieldcat USING 'FIRST_NAME' 'First Name'.
+  PERFORM add_fieldcat USING 'LAST_NAME' 'Last Name'.
+  PERFORM add_fieldcat USING 'PHONE' 'Phone'.
+  PERFORM add_fieldcat USING 'EMAIL_ID' 'Email'.
+  PERFORM add_fieldcat USING 'CITY' 'City'.
+  PERFORM add_fieldcat USING 'REGION_CODE' 'Region'.
+
+*----------------------*
+* Display ALV
+*----------------------*
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program     = sy-repid
+      i_callback_top_of_page = 'TOP_OF_PAGE'
+      it_fieldcat            = gt_fieldcat
+    TABLES
+      t_outtab               = gt_final.
+
+*----------------------*
+* FORM: Add Fieldcat
+*----------------------*
+FORM add_fieldcat USING p_field p_text.
+  CLEAR gs_fieldcat.
+  gs_fieldcat-fieldname = p_field.
+  gs_fieldcat-seltext_m = p_text.
+  APPEND gs_fieldcat TO gt_fieldcat.
+ENDFORM.
+
+*----------------------*
+* Top of Page
+*----------------------*
+FORM top_of_page.
+  CALL FUNCTION 'REUSE_ALV_COMMENTARY_WRITE'
+    EXPORTING
+      it_list_commentary = lt_list.
+ENDFORM.
